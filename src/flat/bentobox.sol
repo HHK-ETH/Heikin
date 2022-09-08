@@ -16,7 +16,7 @@
 
 // Version 20-Mar-2021
 
-pragma solidity 0.6.12;
+pragma solidity ^0.8.16;
 pragma experimental ABIEncoderV2;
 
 // solhint-disable avoid-low-level-calls
@@ -200,17 +200,17 @@ library BoringMath {
     }
 
     function to128(uint256 a) internal pure returns (uint128 c) {
-        require(a <= uint128(-1), "BoringMath: uint128 Overflow");
+        require(a <= type(uint128).max, "BoringMath: uint128 Overflow");
         c = uint128(a);
     }
 
     function to64(uint256 a) internal pure returns (uint64 c) {
-        require(a <= uint64(-1), "BoringMath: uint64 Overflow");
+        require(a <= type(uint64).max, "BoringMath: uint64 Overflow");
         c = uint64(a);
     }
 
     function to32(uint256 a) internal pure returns (uint32 c) {
-        require(a <= uint32(-1), "BoringMath: uint32 Overflow");
+        require(a <= type(uint32).max, "BoringMath: uint32 Overflow");
         c = uint32(a);
     }
 }
@@ -832,7 +832,8 @@ contract BentoBoxV1 is MasterContractManager, BoringBatchable {
     // V2: Private to save gas, to verify it's correct, check the constructor arguments
     IERC20 private immutable wethToken;
 
-    IERC20 private constant USE_ETHEREUM = IERC20(0);
+    IERC20 private constant USE_ETHEREUM =
+        IERC20(0x0000000000000000000000000000000000000000);
     uint256 private constant FLASH_LOAN_FEE = 50; // 0.05%
     uint256 private constant FLASH_LOAN_FEE_PRECISION = 1e5;
     uint256 private constant STRATEGY_DELAY = 2 weeks;
@@ -1251,7 +1252,9 @@ contract BentoBoxV1 is MasterContractManager, BoringBatchable {
             strategy[token] = pending;
             data.strategyStartDate = 0;
             data.balance = 0;
-            pendingStrategy[token] = IStrategy(0);
+            pendingStrategy[token] = IStrategy(
+                0x0000000000000000000000000000000000000000
+            );
             emit LogStrategySet(token, newStrategy);
         }
         strategyData[token] = data;

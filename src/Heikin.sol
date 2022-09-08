@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "./interfaces/IAggregatorInterface.sol";
-import "./interfaces/ITrident.sol";
+import {ITrident, IPool, IBentoBox} from "./interfaces/ITrident.sol";
 
 struct DcaData {
     address owner;
@@ -14,6 +14,7 @@ struct DcaData {
     uint8 decimalsDiff;
     uint256 buyAmount;
     uint256 lastBuy;
+    uint256 balance;
 }
 
 contract Heikin {
@@ -22,13 +23,16 @@ contract Heikin {
     /// -----------------------------------------------------------------------
     error OwnerOnly();
     error ToClose();
+    error InvalidDca();
+    error InsufficientBalance();
 
     /// -----------------------------------------------------------------------
     /// Events
     /// -----------------------------------------------------------------------
-    event ExecuteDCA(uint256 timestamp, uint256 amount);
-    event Withdraw(uint256 share);
-    event CreateDCA(uint256 newDcaId);
+    event CreateDCA(uint256 dcaId);
+    event ExecuteDCA(uint256 dcaId, uint256 received);
+    event WithdrawFromDca(uint256 dcaId, uint256 share);
+    event DeleteDca(uint256 dcaId);
 
     /// -----------------------------------------------------------------------
     /// Immutable variables
@@ -42,7 +46,7 @@ contract Heikin {
     /// -----------------------------------------------------------------------
 
     ///@notice Store dcaData
-    mapping(uint256 => DcaData) public dcaData;
+    mapping(uint256 => DcaData) internal dcaData;
 
     ///@notice Store dca count
     uint256 internal dcaCounter;
@@ -77,7 +81,8 @@ contract Heikin {
         uint64 epochDuration,
         uint8 decimalsDiff,
         uint256 amount
-    ) external {
+    ) external returns (uint256 newDcaId) {
+        newDcaId = dcaCounter;
         dcaData[dcaCounter] = DcaData(
             owner,
             sellToken,
@@ -87,6 +92,7 @@ contract Heikin {
             epochDuration,
             decimalsDiff,
             amount,
+            0,
             0
         );
         dcaCounter += 1;
@@ -125,6 +131,7 @@ contract Heikin {
             data.buyAmount,
             false
         );
+        data.balance -= buyAmount;
 
         //execute the swap on trident by default but since we don't check if pools are whitelisted
         //an intermediate contract could redirect the swap to pools outside of trident.
@@ -134,38 +141,95 @@ contract Heikin {
             path[0].pool,
             buyAmount
         );
+        uint256 amountOut;
         for (uint256 i; i < path.length; ) {
-            IPool(path[i].pool).swap(path[i].data);
+            amountOut = IPool(path[i].pool).swap(path[i].data);
             unchecked {
                 ++i;
             }
         }
 
-        //transfer minAmount minus 1% fee to the owner.
+        //transfer minAmount to the owner.
         bentobox.transfer(
             data.buyToken,
             address(this),
             data.owner,
             bentobox.toShare(data.buyToken, minAmount, false)
         );
-        //transfer remaining shares (up to 1% of minAmount) from the vault to dca executor as a reward.
+        //transfer remaining shares from the DCA to the executor as a reward.
         bentobox.transfer(
             data.buyToken,
             address(this),
             msg.sender,
-            bentobox.balanceOf(data.buyToken, address(this))
+            amountOut - bentobox.toShare(data.buyToken, minAmount, false)
         );
 
         emit ExecuteDCA(data.lastBuy, minAmount);
     }
 
-    ///@notice Allow the owner to withdraw its token from the vault
-    function withdraw(uint256 dcaId, uint256 shares) external {
+    ///@notice Allow the owner to withdraw its token from the DCA
+    function depositIntoDca(
+        uint256 dcaId,
+        uint256 shares,
+        bool fromBento
+    ) external {
+        DcaData memory data = dcaData[dcaId];
+        if (data.sellToken != address(0)) {
+            revert InvalidDca();
+        }
+        if (fromBento) {
+            bentobox.transfer(
+                data.sellToken,
+                msg.sender,
+                address(this),
+                shares
+            );
+        } else {
+            bentobox.deposit(
+                data.sellToken,
+                msg.sender,
+                address(this),
+                0,
+                shares
+            );
+        }
+        emit WithdrawFromDca(dcaId, shares);
+    }
+
+    ///@notice Allow the owner to withdraw its token from the DCA
+    function withdrawFromDca(uint256 dcaId, uint256 shares) external {
         DcaData memory data = dcaData[dcaId];
         if (msg.sender != data.owner) {
             revert OwnerOnly();
         }
+        if (shares > data.balance) {
+            revert InsufficientBalance();
+        }
         bentobox.transfer(data.sellToken, address(this), data.owner, shares);
-        emit Withdraw(shares);
+        emit WithdrawFromDca(dcaId, shares);
+    }
+
+    ///@notice Allow the owner to delete the DCA
+    function deleteDca(uint256 dcaId) external {
+        DcaData memory data = dcaData[dcaId];
+        if (msg.sender != data.owner) {
+            revert OwnerOnly();
+        }
+        bentobox.transfer(
+            data.sellToken,
+            address(this),
+            data.owner,
+            data.balance
+        );
+        delete dcaData[dcaId];
+        emit DeleteDca(dcaId);
+    }
+
+    /// -----------------------------------------------------------------------
+    /// No state change functions
+    /// -----------------------------------------------------------------------
+
+    function getDcaData(uint256 dcaId) external view returns (DcaData memory) {
+        return dcaData[dcaId];
     }
 }

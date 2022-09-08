@@ -9,6 +9,14 @@ interface IBentoBox {
         uint256 share
     ) external;
 
+    function deposit(
+        address token_,
+        address from,
+        address to,
+        uint256 amount,
+        uint256 share
+    ) external payable returns (uint256 amountOut, uint256 shareOut);
+
     function balanceOf(address token, address account)
         external
         returns (uint256);
